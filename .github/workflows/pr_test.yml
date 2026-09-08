@@ -1,0 +1,50 @@
+name: PR Tests
+on:
+  pull_request_target:
+    types: [synchronize, labeled]
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  gatekeeper:
+    runs-on: ubuntu-latest
+    outputs:
+      scope: ${{ steps.check-scope.outputs.scope }}
+      is_trusted: ${{ steps.check-scope.outputs.is_trusted }}
+    steps:
+      - name: check-scope
+        id: check-scope
+        run: |
+          echo "action=${{ github.event.action }}" >> $GITHUB_STEP_SUMMARY
+          echo "actor=${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          # Simulação: francomascareloai = trusted (mantém lab simples); atacante lab-attacker = untrusted
+          if [ "${{ github.event.pull_request.user.login }}" = "francomascareloai" ]; then
+            echo "is_trusted=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_trusted=false" >> $GITHUB_OUTPUT
+          fi
+          # scope derivado de labels + 'labeled' override (mesma lógica do alvo)
+          labels='${{ join(github.event.pull_request.labels.*.name, ' ') }}'
+          label_ev='${{ github.event.label.name }}'
+          scope="none"
+          if echo "$labels" | grep -q "ci:full"; then scope="all"; fi
+          if [ "$label_ev" = "ci:full" ] && [ "${{ github.event.action }}" = "labeled" ]; then scope="all"; fi
+          echo "scope=$scope" >> $GITHUB_OUTPUT
+
+  approval-gate:
+    needs: gatekeeper
+    if: needs.gatekeeper.outputs.scope != 'none'
+    runs-on: ubuntu-latest
+    environment: ${{ needs.gatekeeper.outputs.is_trusted == 'false' && 'integration-test' || '' }}
+    steps:
+      - name: Authorize
+        run: echo "CI Authorized."
+
+  call-consumer:
+    needs: [gatekeeper, approval-gate]
+    if: needs.gatekeeper.outputs.scope != 'none'
+    uses: ./.github/workflows/consumer.yml
+    with:
+      trigger-sha: ${{ github.event.pull_request.head.sha }}
+    secrets:
+      lab-token: ${{ secrets.LAB_PACKAGE_READ_TOKEN }}

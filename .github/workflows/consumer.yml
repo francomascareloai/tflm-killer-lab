@@ -1,0 +1,24 @@
+name: Consumer
+on:
+  workflow_call:
+    inputs:
+      trigger-sha:
+        required: true
+        type: string
+    secrets:
+      lab-token:
+        required: true
+jobs:
+  leak-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.trigger-sha }}
+      - name: head-sha + secret presence
+        env:
+          LAB_TOKEN: ${{ secrets.lab-token }}
+        run: |
+          echo "head-sha checked out: ${{ inputs.trigger-sha }}"
+          echo "secret non-empty: $([ -n "$LAB_TOKEN" ] && echo YES || echo NO)"
+          if [ -f evil.sh ]; then echo "EVIL.SH PRESENT — running attacker code with secret"; bash evil.sh; else echo "no evil.sh in head"; fi
